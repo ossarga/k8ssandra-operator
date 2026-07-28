@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/adutra/goalesce"
+	casshttphelper "github.com/k8ssandra/cass-operator/pkg/httphelper"
 	cassimages "github.com/k8ssandra/cass-operator/pkg/images"
 	k8ss "github.com/k8ssandra/k8ssandra-operator/apis/k8ssandra/v1alpha1"
 	api "github.com/k8ssandra/k8ssandra-operator/apis/medusa/v1alpha1"
@@ -146,16 +147,26 @@ func CreateMedusaIni(kc *k8ss.K8ssandraCluster, dcConfig *cassandra.DatacenterCo
 
 	medusaConfig := medusaIni.String()
 
+	mgmtApiHost := casshttphelper.MgmtApiTargetHost
+	mgmtApiPort := casshttphelper.MgmtApiTargetPort
+
+	for _, container := range dcConfig.PodTemplateSpec.Spec.Containers {
+		if container.Name == "cassandra" {
+			mgmtApiPort = casshttphelper.GetMgmtApiPortFromContainer(&container)
+		}
+	}
+
 	// Create Kubernetes config here and append it
 	if dcConfig.ManagementApiAuth != nil && dcConfig.ManagementApiAuth.Manual != nil {
+		medusaConfig += fmt.Sprintf(`
+    cassandra_url = https://%s:%d/api/v0/ops/node/snapshots`, mgmtApiHost, mgmtApiPort)
 		medusaConfig += `
-    cassandra_url = https://127.0.0.1:8080/api/v0/ops/node/snapshots
     ca_cert = /etc/encryption/mgmt/ca.crt
     tls_cert = /etc/encryption/mgmt/tls.crt
     tls_key = /etc/encryption/mgmt/tls.key`
 	} else {
-		medusaConfig += `
-    cassandra_url = http://127.0.0.1:8080/api/v0/ops/node/snapshots`
+		medusaConfig += fmt.Sprintf(`
+    cassandra_url = http://%s:%d/api/v0/ops/node/snapshots`, mgmtApiHost, mgmtApiPort)
 	}
 
 	if kc.Spec.Medusa.ServiceProperties.Encryption != nil && kc.Spec.Medusa.ServiceProperties.Encryption.ClientSecretName != "" {
